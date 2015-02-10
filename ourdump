@@ -87,6 +87,8 @@ die "Died: couldnot find mysqldump" unless $mysqldump;
 $host ||= 'localhost';
 $port ||= 3306;
 $user ||= 'root';
+$password = $ENV{MYSQL_PWD} if exists $ENV{MYSQL_PWD};
+
 my $dbh = DBI->connect_cached('dbi:mysql:mysql;host='.$host.';port='.$port, $user, $password, {
     RaiseError => 1,
     PrintError => 0,
@@ -109,7 +111,7 @@ my $master_status = get_master_status($dbh);
 my $slave_status = get_slave_status($dbh);
 
 _log("[MASTER STATUS] $master_status");
-_log("[SLAVE STATUS] $slave_status");
+_log("[SLAVE STATUS] $slave_status") if defined $slave_status;
 _log("[START] mysqldump --databases " . join(" ", @databases));
 
 pipe my $logrh, my $logwh
@@ -140,9 +142,8 @@ elsif ( $pid == 0 ) {
         '--extended-insert',
         '--single-transaction',
         '--order-by-primary',
-        '--routines'
-        '--databases',
-        @databases
+        '--routines',
+        @databases > 1 ? ('--databases',@databases) : (@databases)
     );
     die "Died: exec failed: $!";
 }
@@ -152,8 +153,8 @@ close $logwh;
 my $unlock=0;
 while(<$logrh>){
     print;
-    if ( $unlock == 0 && m!^CREATE DATABASE!) {
-        _wlog('Found first "CREATE DATABASE" statement. execute UNLOCK TABLES');
+    if ( $unlock == 0 && m!^CREATE (DATABASE|TABLE)!) {
+        _wlog("Found first \"CREATE $1\" statement. execute UNLOCK TABLES");
         $dbh->do('UNLOCK TABLE');
         $unlock++;
     }
