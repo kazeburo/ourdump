@@ -1,0 +1,180 @@
+#!perl
+
+use strict;
+use warnings;
+use DBI;
+use Getopt::Long;
+
+sub _log {
+    my $log = ( @_ > 1 ) ? sprintf shift,@_ : $_[0];
+    my @lt = localtime;
+    my $lt = sprintf '%04d-%02d-%02dT%02d:%02d:%02d', $lt[5]+1900,$lt[4]+1,$lt[3],$lt[2],$lt[1],$lt[0];
+    print "-- [$lt] $log\n";
+    warn "[$lt] $log\n";
+}
+
+sub _wlog {
+    my $log = ( @_ > 1 ) ? sprintf shift,@_ : $_[0];
+    my @lt = localtime;
+    my $lt = sprintf '%04d-%02d-%02dT%02d:%02d:%02d', $lt[5]+1900,$lt[4]+1,$lt[3],$lt[2],$lt[1],$lt[0];
+    warn "[$lt] $log\n";
+}
+
+sub lc_key {
+    my $hashref = shift;
+    my %hash;
+    $hash{lc($_)}=$hashref->{$_} for keys %$hashref;
+    return \%hash;
+}
+
+sub get_master_status {
+    my $dbh = shift;
+    my %master = @_;
+
+    my $sth = $dbh->prepare('SHOW MASTER STATUS');
+    $sth->execute;
+    my $repl_status = lc_key($sth->fetchrow_hashref('NAME'));
+    die "Died: couldnot get master status" unless $repl_status->{file};
+
+    return sprintf "CHANGE MASTER TO MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s",
+        $repl_status->{file},
+        $repl_status->{position};
+}
+
+sub get_slave_status {
+    my $dbh = shift;
+    my %master = @_;
+
+    my $sth = $dbh->prepare('SHOW SLAVE STATUS');
+    $sth->execute;
+    my $repl_status = lc_key($sth->fetchrow_hashref('NAME'));
+
+    return unless $repl_status->{relay_master_log_file};
+
+    return sprintf "CHANGE MASTER TO MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s, MASTER_HOST='%s', MASTER_PORT=%s;",
+        $repl_status->{relay_master_log_file},
+        $repl_status->{exec_master_log_pos},
+        $repl_status->{master_host},
+        $repl_status->{master_port};
+}
+
+Getopt::Long::Configure ("no_ignore_case");
+GetOptions(
+    "host=s" => \my $host,
+    "port=s" => \my $port,
+    "user=s" => \my $user,
+    "password=s" => \my $password,
+    "h|help" => \my $help,
+);
+
+if ( $help ) {
+    _wlog("usage: $0 --host=host --port=port --user=user --password=password  -- [database,[database]...]");
+    exit(0);
+}
+
+my @databases = @ARGV;
+$|=1;
+
+my $mysqldump;
+for ( split /:/, $ENV{PATH} ) {
+    if ( -x "$_/mysqldump" ) {
+        $mysqldump = "$_/mysqldump";
+        last;
+    }
+}
+die "Died: couldnot find mysqldump" unless $mysqldump;
+
+$host ||= 'localhost';
+$port ||= 3306;
+$user ||= 'root';
+my $dbh = DBI->connect_cached('dbi:mysql:mysql;host='.$host.';port='.$port, $user, $password, {
+    RaiseError => 1,
+    PrintError => 0,
+    ShowErrorStatement => 1,
+});
+
+_log("ourdump start");
+$dbh->do('FLUSH TABLES WITH READ LOCK');
+_log('Done "FLUSH TABLES WITH READ LOCK"');
+
+if (!@databases) {
+    my $sth = $dbh->prepare('SHOW DATABASES');
+    $sth->execute();
+    while ( my $ret = $sth->fetchrow_arrayref ) {
+        push @databases, $ret->[0] if $ret->[0] !~ /^(?:information_schema|performance_schema|mysql|test)$/;
+    }
+}
+
+my $master_status = get_master_status($dbh);
+my $slave_status = get_slave_status($dbh);
+
+_log("[MASTER STATUS] $master_status");
+_log("[SLAVE STATUS] $slave_status");
+_log("[START] mysqldump --databases " . join(" ", @databases));
+
+pipe my $logrh, my $logwh
+    or die "Died: failed to create pipe:$!";
+my $pid = fork;
+if ( ! defined $pid ) {
+    die "Died: fork failed: $!";
+}
+
+elsif ( $pid == 0 ) {
+    #child
+    $dbh->STORE(InactiveDestroy => 1);
+    close $logrh;
+    open STDOUT, '>&', $logwh
+        or die "Died: failed to redirect STDOUT";
+    close $logwh;
+    $ENV{MYSQL_PWD} = $password if defined $password;
+    exec(
+        $mysqldump,
+        '--host',
+        $host,
+        '--port',
+        $port,
+        '--user',
+        $user,
+        '--quick',
+        '--add-locks',
+        '--extended-insert',
+        '--single-transaction',
+        '--order-by-primary',
+        '--routines'
+        '--databases',
+        @databases
+    );
+    die "Died: exec failed: $!";
+}
+
+#parent
+close $logwh;
+my $unlock=0;
+while(<$logrh>){
+    print;
+    if ( $unlock == 0 && m!^CREATE DATABASE!) {
+        _wlog('Found first "CREATE DATABASE" statement. execute UNLOCK TABLES');
+        $dbh->do('UNLOCK TABLE');
+        $unlock++;
+    }
+}
+close $logrh;
+
+while (wait == -1) {}
+my $exit_code = $?;
+
+if ( $exit_code != 0 ) {
+    _log("Error: mysqldump exited with code: %d", $exit_code >> 8);
+}
+
+_log("ourdump ended ");
+exit($exit_code >> 8);
+
+
+
+
+
+
+
+
+
