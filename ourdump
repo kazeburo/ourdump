@@ -65,10 +65,12 @@ GetOptions(
     "user=s" => \my $user,
     "password=s" => \my $password,
     "h|help" => \my $help,
+    "t|table" => \my $table,
 );
 
 if ( $help ) {
     _wlog("usage: $0 --host=host --port=port --user=user --password=password  -- [database,[database]...]");
+    _wlog("usage: $0 --host=host --port=port --user=user --password=password -t -- [database,[table]...]");
     exit(0);
 }
 
@@ -143,7 +145,7 @@ elsif ( $pid == 0 ) {
         '--single-transaction',
         '--order-by-primary',
         '--routines',
-        @databases > 1 ? ('--databases',@databases) : (@databases)
+        (@databases > 1 && !$table) ? ('--databases',@databases) : (@databases)
     );
     die "Died: exec failed: $!";
 }
