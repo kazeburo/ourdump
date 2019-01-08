@@ -34,7 +34,10 @@ sub get_master_status {
     my $sth = $dbh->prepare('SHOW MASTER STATUS');
     $sth->execute;
     my $repl_status = lc_key($sth->fetchrow_hashref('NAME'));
-    die "Died: couldnot get master status" unless $repl_status->{file};
+    if (! exists $repl_status->{file}) {
+        _wlog("Could not get master status");
+        return "-- Could not get master status. Maybe binlog was disabled";
+    }
 
     return sprintf "CHANGE MASTER TO MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s",
         $repl_status->{file},
@@ -172,12 +175,3 @@ if ( $exit_code != 0 ) {
 
 _log("ourdump ended ");
 exit($exit_code >> 8);
-
-
-
-
-
-
-
-
-
