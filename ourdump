@@ -108,7 +108,7 @@ if (!@databases) {
     my $sth = $dbh->prepare('SHOW DATABASES');
     $sth->execute();
     while ( my $ret = $sth->fetchrow_arrayref ) {
-        push @databases, $ret->[0] if $ret->[0] !~ /^(?:information_schema|performance_schema|mysql|test)$/;
+        push @databases, $ret->[0] if $ret->[0] !~ /^(?:information_schema|performance_schema|mysql|test|sys)$/;
     }
 }
 
@@ -148,6 +148,8 @@ elsif ( $pid == 0 ) {
         '--single-transaction',
         '--order-by-primary',
         '--routines',
+        '--triggers',
+        '--events',
         '--hex-blob',
         (@databases > 1 && !$table) ? ('--databases',@databases) : (@databases)
     );
