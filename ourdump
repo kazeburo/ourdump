@@ -148,6 +148,8 @@ elsif ( $pid == 0 ) {
         '--single-transaction',
         '--order-by-primary',
         '--routines',
+        '--triggers',
+        '--events',
         '--hex-blob',
         (@databases > 1 && !$table) ? ('--databases',@databases) : (@databases)
     );
