@@ -161,7 +161,7 @@ close $logwh;
 
 if (!$restorelog) {
     print 'SET @OLD_SQL_LOG_BIN=@@SQL_LOG_BIN, SQL_LOG_BIN=0;'."\n";
-    print 'SET @OLD_LONG_QUEY_TIME=@@LONG_QUERY_TIME, LONG_QUERY_TIME=3306;'."\n";
+    print 'SET @OLD_LONG_QUERY_TIME=@@LONG_QUERY_TIME, LONG_QUERY_TIME=3306;'."\n";
 }
 
 my $unlock=0;
@@ -180,7 +180,7 @@ my $exit_code = $?;
 
 if (!$restorelog) {
     print 'SET SQL_LOG_BIN=@OLD_SQL_LOG_BIN;'."\n";
-    print 'SET LONG_QUEY_TIME=@OLD_LONG_QUEY_TIME;'."\n";
+    print 'SET LONG_QUERY_TIME=@OLD_LONG_QUERY_TIME;'."\n";
 }
 
 if ( $exit_code != 0 ) {
